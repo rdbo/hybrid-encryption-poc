@@ -54,7 +54,6 @@ server_public_key_ec = server_key_ec.public_key().export_key(format="raw")
 print("Server public key (ECDH): " + server_public_key_ec.hex())
 
 # Encrypt the server ECDH public key and send it back to the client
-# TODO: Encrypt using sha256 of client key!
 # TODO: Send tag as MAC (encrypt_and_digest)
 enc_server_public_key_ec = client_cipher_ec.encrypt(server_public_key_ec)
 conn.send(enc_server_public_key_ec)

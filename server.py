@@ -44,6 +44,8 @@ print("Client public key: " + client_public_key_ec.hex())
 # NOTE: this encryption is done symetrically, using the client's public key.
 #       This means that the client public key should be unique for this connection (ephemeral).
 client_cipher_ec = AES.new(client_public_key_ec, AES.MODE_GCM)
+print("Client public key nonce: " + client_cipher_ec.nonce.hex())
+print("Size of nonce: " + str(len(client_cipher_ec.nonce)))
 
 # Generate the server's Elliptic Curve Diffie Hellman (Ephemeral) parameters for the connected client
 # NOTE: We are handling only one client, so we don't have to do anything more complex here, but in an
@@ -55,6 +57,9 @@ print("Server public key (ECDH): " + server_public_key_ec.hex())
 
 # Encrypt the server ECDH public key and send it back to the client
 # TODO: Send tag as MAC (encrypt_and_digest)
-enc_server_public_key_ec = client_cipher_ec.encrypt(server_public_key_ec)
-conn.send(enc_server_public_key_ec)
+enc_server_public_key_ec, tag = client_cipher_ec.encrypt_and_digest(server_public_key_ec)
+print("MAC: " + tag.hex())
+conn.send(client_cipher_ec.nonce + tag + enc_server_public_key_ec)
 
+# Generate shared key
+# TODO

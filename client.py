@@ -19,11 +19,6 @@ key = ECC.generate(curve="ed25519")
 public_key = key.public_key().export_key(format="raw")
 print("Client public key (ECDH): " + public_key.hex())
 
-# Generate symetric cipher for the client's public key
-# NOTE: Because of the symetrical encryption done by the server,
-#       the public key should not be known by third-parties!
-cipher_ec = AES.new(public_key, AES.MODE_GCM)
-
 # Connect to server
 print("Connecting to the server...")
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -35,6 +30,18 @@ enc_public_key = server_cipher_rsa.encrypt(public_key)
 sock.send(enc_public_key)
 
 # Receive server's ECDH public key to establish shared secret
-enc_server_public_key_ec = sock.recv(2048) # The packet size is unknown, so just using 2048 here
-server_public_key_ec = cipher_ec.decrypt(enc_server_public_key_ec)
+enc_data = sock.recv(2048) # The packet size is unknown, so just using 2048 here
+nonce = enc_data[:16] # First 16 bytes are the nonce
+print("Server nonce: " + nonce.hex())
+tag = enc_data[16:32] # Message Authentication Code (MAC)
+enc_server_public_key_ec = enc_data[32:] # The rest is the encrypted public key
+
+# Generate symetric cipher for the client's public key
+# NOTE: Because of the symetrical encryption done by the server,
+#       the public key should not be known by third-parties!
+cipher_ec = AES.new(public_key, AES.MODE_GCM, nonce=nonce)
+server_public_key_ec = cipher_ec.decrypt_and_verify(enc_server_public_key_ec, tag)
 print("Server public key (ECDH): " + server_public_key_ec.hex())
+
+# Generate shared key
+# TODO

@@ -1,6 +1,7 @@
-from Cryptodome.PublicKey import RSA, ECC
+from Cryptodome.PublicKey import RSA
 from Cryptodome.Cipher import PKCS1_OAEP, AES
 from Cryptodome import Random
+import x25519
 import socket
 
 # Generate RSA keypair from random bytes
@@ -34,16 +35,17 @@ conn, addr = sock.accept()
 
 print("Client connected: " + str(addr))
 
-# Receive the client's encrypted ECDHE public key and decrypt it using the server's private key
+# Receive the client's encrypted ECDHE public key and session key, and decrypt them using the server's private key
 print("Receiving client's encrypted ECDHE public key...")
-enc_client_public_key = conn.recv(rsa_packet_size)
-client_public_key_ec = cipher_rsa.decrypt(enc_client_public_key)
+enc_data = conn.recv(rsa_packet_size)
+data = cipher_rsa.decrypt(enc_data)
+session_key = data[:32]
+client_public_key_ec = data[32:]
 print("Client public key: " + client_public_key_ec.hex())
+print("Session key: " + session_key[:2].hex() + "..." + session_key[-2:].hex())
 
-# Create cipher encryption using the client's public ECDH key
-# NOTE: this encryption is done symetrically, using the client's public key.
-#       This means that the client public key should be unique for this connection (ephemeral).
-client_cipher_ec = AES.new(client_public_key_ec, AES.MODE_GCM)
+# Create cipher encryption using the client's session key
+client_cipher_ec = AES.new(session_key, AES.MODE_GCM)
 print("Client public key nonce: " + client_cipher_ec.nonce.hex())
 print("Size of nonce: " + str(len(client_cipher_ec.nonce)))
 
@@ -51,15 +53,43 @@ print("Size of nonce: " + str(len(client_cipher_ec.nonce)))
 # NOTE: We are handling only one client, so we don't have to do anything more complex here, but in an
 #       real world scenario, we would generate ECDH keys for every connected client
 print("Generating ECDHE parameters for this connection...")
-server_key_ec = ECC.generate(curve="ed25519")
-server_public_key_ec = server_key_ec.public_key().export_key(format="raw")
+server_key_ec = Random.get_random_bytes(32)
+server_public_key_ec = x25519.scalar_base_mult(server_key_ec)
 print("Server public key (ECDH): " + server_public_key_ec.hex())
 
 # Encrypt the server ECDH public key and send it back to the client
-# TODO: Send tag as MAC (encrypt_and_digest)
 enc_server_public_key_ec, tag = client_cipher_ec.encrypt_and_digest(server_public_key_ec)
 print("MAC: " + tag.hex())
 conn.send(client_cipher_ec.nonce + tag + enc_server_public_key_ec)
 
 # Generate shared key
-# TODO
+shared_key = x25519.scalar_mult(server_key_ec, client_public_key_ec)
+print("Shared Key: " + shared_key[:2].hex() + "..." + shared_key[-2:].hex())
+
+# Receive and decrypt message from client using shared key
+enc_data = conn.recv(2048)
+print("Received message from the client")
+nonce = enc_data[:16]
+tag = enc_data[16:32]
+enc_msg = enc_data[32:]
+print("Nonce: " + nonce.hex())
+print("MAC: " + tag.hex())
+
+# Generate cipher to decrypt the message, and decrypt it
+shared_cipher_ec = AES.new(shared_key, AES.MODE_GCM, nonce=nonce)
+data = shared_cipher_ec.decrypt_and_verify(enc_msg, tag)
+print("Client Message: " + data.decode())
+
+# Generate cipher to encrypt message to the client, and encrypt it
+message = b"Hello client!"
+print("Message to the client: " + message.decode())
+shared_cipher_ec = AES.new(shared_key, AES.MODE_GCM)
+enc_msg, tag = shared_cipher_ec.encrypt_and_digest(message)
+nonce = shared_cipher_ec.nonce
+print("Nonce: " + nonce.hex())
+print("Size of nonce: " + str(len(nonce)))
+print("MAC: " + tag.hex())
+
+# Send encrypted message to the server, along with the nonce and the MAC
+conn.send(nonce + tag + enc_msg)
+print("Sent message to the client")
